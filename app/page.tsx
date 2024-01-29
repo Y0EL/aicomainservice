@@ -100,7 +100,7 @@ export default function Chat() {
               Selamat Datang di AICO!
             </h1>
             <p className="text-gray-500">
-              AICO Adalah{" "}
+              AICO Adalah{" "}AI
               yang bertugas untuk menganalisa Script TikTok kamu!<br></br>
               Script TikTok masih membosankan? boring? gak rame?? ayo kita lihat script TikTok kamu kedepannya setelah dianalisa!{" "}
               {" "}
