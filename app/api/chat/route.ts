@@ -1,7 +1,10 @@
 import { kv } from "@vercel/kv";
 import { Ratelimit } from "@upstash/ratelimit";
 import { OpenAI } from "openai";
-import { OpenAIStream, StreamingTextResponse } from "ai";
+import {
+  OpenAIStream,
+  StreamingTextResponse,
+} from "ai";
 import { functions, runFunction } from "./functions";
 
 const openai = new OpenAI({
@@ -10,63 +13,62 @@ const openai = new OpenAI({
 
 export const runtime = "edge";
 
-// Helper function to add delay
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// Function to calculate dynamic delay
-function calculateDelay(messageLength, maxLength) {
-  const maxDelay = 100; // Maximum delay for short messages
-  const minDelay = 30;  // Minimum delay for long messages
-  const delay = maxDelay - ((maxDelay - minDelay) * (messageLength / maxLength));
-  return Math.max(delay, minDelay);
-}
-
 export async function POST(req: Request) {
-  // Rate limit logic
-  if (process.env.NODE_ENV !== "development" && process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
+  if (
+    process.env.NODE_ENV !== "development" &&
+    process.env.KV_REST_API_URL &&
+    process.env.KV_REST_API_TOKEN
+  ) {
     const ip = req.headers.get("x-forwarded-for");
-    const ratelimit = new Ratelimit({ redis: kv, limiter: Ratelimit.slidingWindow(50, "1 d") });
-    const { success, limit, reset, remaining } = await ratelimit.limit(`chathn_ratelimit_${ip}`);
+    const ratelimit = new Ratelimit({
+      redis: kv,
+      limiter: Ratelimit.slidingWindow(50, "1 d"),
+    });
+
+    const { success, limit, reset, remaining } = await ratelimit.limit(
+      `chathn_ratelimit_${ip}`,
+    );
+
     if (!success) {
-      return new Response("You have reached your request limit for the day.", { status: 429, headers: { "X-RateLimit-Limit": limit.toString(), "X-RateLimit-Remaining": remaining.toString(), "X-RateLimit-Reset": reset.toString() } });
+      return new Response("You have reached your request limit for the day.", {
+        status: 429,
+        headers: {
+          "X-RateLimit-Limit": limit.toString(),
+          "X-RateLimit-Remaining": remaining.toString(),
+          "X-RateLimit-Reset": reset.toString(),
+        },
+      });
     }
   }
 
-  // Request handling
   const { messages } = await req.json();
-  const maxLength = 200; // Maximum length for dynamic delay calculation
 
-  // System message
-  const systemMessage = { /* Your system message content */ };
+  // Menambahkan pesan sistem
+  const systemMessage = {
+    role: "system",
+    content: "Kamu adalah AICO, asisten virtual berbahasa Indonesia yang bertugas membantu mengembangkan konten TikTok untuk influencer besar. Sekarang, Lakukan riset diinternet sebelum memberikan penilaian'. Kamu bisa ngasih insight tentang tren, statistik audiens, dan topik populer berdasarkan data tersebut. Tugas-tugas kamu termasuk:\n\n- Menilai skrip video TikTok dan memberikan hanya penilaian.\n\n1. Judul: [Judul yang menarik berdasarkan tren]\n2. Skor Potensi Viral: [Berdasarkan data dan analisis]\n3. Estimasi Jumlah Suka: [Berdasarkan tren dan data]\n\nKarakter kamu bergaya 'Saya' dan 'kamu', dengan kepribadian INFJ dan zodiak Gemini. Moto kamu 'Artificial Intelligence for Creative Opportunities', menekankan penggunaan AI untuk membuka peluang baru di industri kreatif. Setelah kamu sudah memberikan semuannya pastikan kamu memberikan saran untuk improve konten yang sekiranya cocok dan pas untuk audiens pada konteks wkwkk. Untuk skor potensi viral, estimasi jumlah suka gausah pake alasan, cukup kasih angka saja. tugas kamu hanya penganalisa saja!"
+  };
 
-  const initialResponse = await openai.chat.completions.create({ model: "gpt-4-0125-preview", messages: [systemMessage, ...messages], stream: true, functions, function_call: "auto" });
+  const initialResponse = await openai.chat.completions.create({
+    model: "gpt-4-0125-preview", // Model yang diupdate
+    messages: [systemMessage, ...messages],
+    stream: true,
+    functions,
+    function_call: "auto",
+  });
 
-  // Stream implementation
   const stream = OpenAIStream(initialResponse, {
-    experimental_onFunctionCall: async ({ name, arguments: args }, createFunctionCallMessages) => {
+    experimental_onFunctionCall: async (
+      { name, arguments: args },
+      createFunctionCallMessages,
+    ) => {
       const result = await runFunction(name, args);
       const newMessages = createFunctionCallMessages(result);
-
-      if (newMessages.length > 0) {
-        // Dynamic typing effect implementation
-        const readableStream = new ReadableStream({
-          async start(controller) {
-            for (const message of newMessages) {
-              const delay = calculateDelay(message.content.length, maxLength);
-              for (const char of message.content) {
-                controller.enqueue(new TextEncoder().encode(char));
-                await sleep(delay);
-              }
-            }
-            controller.close();
-          }
-        });
-        return new StreamingTextResponse(readableStream);
-      } else {
-        return;
-      }
+      return openai.chat.completions.create({
+        model: "gpt-4-0125-preview", // Model yang diupdate
+        stream: true,
+        messages: [...messages, ...newMessages],
+      });
     },
   });
 
